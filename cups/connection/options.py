@@ -33,12 +33,13 @@ class OptionsMixin(_Base):
                 value=value,
             )
 
-        answer: IPPRequest = IPPRequest(
-            _lib.cupsDoRequest(self.http, req.ffi_value, "/admin/")
-        )
+        req._transfer_ownership()
+        c_ans = _lib.cupsDoRequest(self.http, req.ffi_value, b"/admin/")
 
-        if not answer:
+        if c_ans == _ffi.NULL:
             raise IPPError("No response from server")
+
+        answer = IPPRequest.from_owned_cdata(c_ans)
 
         if answer.statuscode == IPPStatus.ERROR_NOT_POSSIBLE:
             raise IPPError("Operation not possible, the printer may be a class")

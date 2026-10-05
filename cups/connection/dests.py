@@ -5,7 +5,7 @@ from cups.types.ipp import IPPAttribute, IPPRequest, IPPStatus, IPPError
 from cups.enums.cups import CUPSDestFlags
 from cups.enums.media import CUPSMediaFlags
 from cups.enums.ipp import IPPOp, IPPTag
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence, Union
 from cups.utils import _bytes_to_value
 
 from .base import _Base
@@ -18,34 +18,51 @@ class DestsMixin(_Base):
     http: Any
 
     def addDest(self, name: str, instance: Optional[str] = None) -> Dict[str, cupsDest]:
-        dests = self.getDests()
         c_name = _ffi.new("char[]", name.encode("utf-8"))
         c_instance = (
             _ffi.new("char[]", instance.encode("utf-8")) if instance else _ffi.NULL
         )
-        c_dests = cupsDest.to_cffi_list(dests)
-        count = _lib.cupsAddDest(c_name, c_instance, len(dests), c_dests)
-        return cupsDest.from_cffi_list(dests=c_dests, count=count)
+
+        c_dests_ptr = _ffi.new("cups_dest_t **")
+        count: int = _lib.cupsGetDests(self.http, c_dests_ptr)
+        free_count = count
+
+        try:
+            new_count = _lib.cupsAddDest(c_name, c_instance, count, c_dests_ptr)
+            if new_count > 0:
+                free_count = new_count
+            if new_count == 0 or c_dests_ptr[0] == _ffi.NULL:
+                return {}
+            return cupsDest.from_cffi_list(c_dests_ptr[0], new_count)
+        finally:
+            if free_count > 0 and c_dests_ptr[0] != _ffi.NULL:
+                _lib.cupsFreeDests(free_count, c_dests_ptr[0])
 
     def findDestDefault(self, dest: cupsDest, dinfo: cupsDestInfo, option: str) -> IPPAttribute:
+        c_dest, keepalive = dest.to_cffi()
         return IPPAttribute(
             _lib.cupsFindDestDefault(
-                self.http, dest.ffi_value, dinfo.ffi_value, option.encode()
-            )
+                self.http, c_dest, dinfo.ffi_value, option.encode()
+            ),
+            parent=dinfo,
         )
 
     def findDestReady(self, dest: cupsDest, dinfo: cupsDestInfo, option: str) -> IPPAttribute:
+        c_dest, keepalive = dest.to_cffi()
         return IPPAttribute(
             _lib.cupsFindDestReady(
-                self.http, dest.ffi_value, dinfo.ffi_value, option.encode()
-            )
+                self.http, c_dest, dinfo.ffi_value, option.encode()
+            ),
+            parent=dinfo,
         )
 
     def findDestSupported(self, dest: cupsDest, dinfo: cupsDestInfo, option: str) -> IPPAttribute:
+        c_dest, keepalive = dest.to_cffi()
         return IPPAttribute(
             _lib.cupsFindDestSupported(
-                self.http, dest.ffi_value, dinfo.ffi_value, option.encode()
-            )
+                self.http, c_dest, dinfo.ffi_value, option.encode()
+            ),
+            parent=dinfo,
         )
 
 
@@ -53,21 +70,26 @@ class DestsMixin(_Base):
         return _bytes_to_value(_lib.cupsGetDefault(self.http))
 
     def getDests(self) -> Dict[str, cupsDest]:
-        dests: cupsDest = cupsDest("**")
-        count: int = _lib.cupsGetDests(self.http, dests.ffi_value)
+        c_dests = _ffi.new("cups_dest_t **")
+        count: int = _lib.cupsGetDests(self.http, c_dests)
+        try:
+            if count == 0 or c_dests[0] == _ffi.NULL:
+                return {}
+            return cupsDest.from_cffi_list(c_dests[0], count)
+        finally:
+            if count > 0 and c_dests[0] != _ffi.NULL:
+                _lib.cupsFreeDests(count, c_dests[0])
 
-        return cupsDest.from_cffi_list(dests=dests, count=count)
-
-    def setDests(self, dests: list[cupsDest]) -> bool:
-        return _bytes_to_value(
-            _lib.cupsSetDests(self.http, len(dests), cupsDest.to_cffi_list(dests))
-        )
+    def setDests(self, dests: Union[Dict[str, cupsDest], Sequence[cupsDest]]) -> bool:
+        c_dests, keepalive = cupsDest.to_cffi_list(dests)
+        return bool(_lib.cupsSetDests(self.http, len(dests), c_dests))
 
     def copyDestInfo(
         self, dest: cupsDest, flags: CUPSDestFlags = CUPSDestFlags.NONE
     ) -> cupsDestInfo:
-        return cupsDestInfo(
-            _lib.cupsCopyDestInfo(self.http, dest.ffi_value, flags.value)
+        c_dest, keepalive = dest.to_cffi()
+        return cupsDestInfo.from_owned_cdata(
+            _lib.cupsCopyDestInfo(self.http, c_dest, flags.value)
         )
 
     def checkDestSupported(
@@ -77,11 +99,12 @@ class DestsMixin(_Base):
         option: str,
         value: Optional[str] = None,
     ) -> bool:
+        c_dest, keepalive = dest.to_cffi()
         return bool(
             _bytes_to_value(
                 _lib.cupsCheckDestSupported(
                     self.http,
-                    dest.ffi_value,
+                    c_dest,
                     dinfo.ffi_value,
                     option.encode(),
                     value.encode() if value else _ffi.NULL,

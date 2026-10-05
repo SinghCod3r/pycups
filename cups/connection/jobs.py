@@ -11,7 +11,7 @@ class JobMixin:
 
     def _do_printer_request(self, name: str, op: IPPOp, reason: Optional[str] = None) -> None:
         uri: str = f"ipp://localhost/printers/{name}"
-        req: IPPRequest = IPPRequest.cffi_new(op)
+        req: IPPRequest = IPPRequest(op)
         req.addString(
             group=IPPTag.OPERATION, value_tag=IPPTag.URI, name="printer-uri", value=uri
         )
@@ -24,14 +24,16 @@ class JobMixin:
                 value=reason,
             )
 
-        answer: IPPRequest = IPPRequest(
-            _lib.cupsDoRequest(self.http, req.ffi_value, "/admin/")
-        )
+        req._transfer_ownership()
+        c_ans = _lib.cupsDoRequest(self.http, req.ffi_value, b"/admin/")
+
+        answer = IPPRequest.from_owned_cdata(c_ans) if c_ans != _cups.ffi.NULL else None
 
         if not answer or answer.statuscode > IPPStatus.OK_CONFLICTING:
             raise IPPError(answer)
 
         return None
+
 
     def acceptJobs(self, queue_name: str) -> None:
         return self._do_printer_request(queue_name, op=IPPOp.CUPS_ACCEPT_JOBS)

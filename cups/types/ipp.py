@@ -20,6 +20,11 @@ class IPPAttribute(cupsBaseClass):
     """
     ffi_free: str = "ippDeleteAttributes"
 
+    def __init__(self, arg: Any = None, parent: Any = None):
+        super().__init__(arg)
+        self._parent = parent
+
+
     @property
     def credentials(self) -> str:
         c_credentials = _lib.ippCopyCredentialsString(self.ffi_value)
@@ -156,17 +161,19 @@ class IPPAttribute(cupsBaseClass):
 
 class IPPRequest(cupsBaseClass):
     ffi_name: str = "ipp_t"
+    ffi_free: str = "ippDelete"
 
     def __init__(self, arg: Optional[Union[IPPOp, Any]] = None):
+        self._transferred = False
         if isinstance(arg, IPPOp):
             self.ffi_value = _lib.ippNewRequest(arg)
-
-        elif arg and self._is_valid_ctype(arg):
+            self._owned = True
+        elif arg is not None and arg != _ffi.NULL and self._is_valid_ctype(arg):
             self.ffi_value = arg
-
-        elif not arg:
+            self._owned = False
+        elif arg is None:
             self.ffi_value = _lib.ippNew()
-
+            self._owned = True
         else:
             raise ValueError("Invalid arguments passed")
 
@@ -175,7 +182,7 @@ class IPPRequest(cupsBaseClass):
         attrs: list[IPPAttribute] = []
         attr = _lib.ippGetFirstAttribute(self.ffi_value)
         while attr != _ffi.NULL:
-            attrs.append(IPPAttribute(attr))
+            attrs.append(IPPAttribute(attr, parent=self))
             attr = _lib.ippGetNextAttribute(self.ffi_value)
         return attrs
 
@@ -225,7 +232,8 @@ class IPPRequest(cupsBaseClass):
                 name.encode(),
                 language,
                 value.encode(),
-            )
+            ),
+            parent=self,
         )
 
     def addStrings(
@@ -254,7 +262,8 @@ class IPPRequest(cupsBaseClass):
                 len(values),
                 language,
                 c_array,
-            )
+            ),
+            parent=self,
         )
 
     def setString(
@@ -267,7 +276,8 @@ class IPPRequest(cupsBaseClass):
             raise RuntimeError("Invalid parameters passed")
 
         return IPPAttribute(
-            _lib.ippSetString(self.ffi_value, attr.ffi_value, position, value.encode())
+            _lib.ippSetString(self.ffi_value, attr.ffi_value, position, value.encode()),
+            parent=self,
         )
 
     def read(self, http: Http) -> IPPState:
@@ -328,7 +338,8 @@ class IPPFile(cupsBaseClass):
         return IPPAttribute(
             _lib.ippFileGetAttribute(
                 self.ffi_value, _value_to_bytes(name), value_tag.value
-            )
+            ),
+            parent=self,
         )
 
     def getAttributes(self) -> IPPRequest:

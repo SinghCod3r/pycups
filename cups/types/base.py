@@ -1,8 +1,7 @@
-# Base class for all the types of CUPs
-
 from abc import ABC
 from functools import singledispatchmethod
 from typing import Any
+import sys
 
 from cups import _cups
 
@@ -17,6 +16,8 @@ class cupsBaseClass(ABC):
 
     @singledispatchmethod
     def __init__(self, arg: Any = None) -> "cupsBaseClass":
+        self._owned = True
+        self._transferred = False
         if arg is None:
             self.ffi_value = _ffi.new(f"{self.ffi_name} *")
         else:
@@ -24,10 +25,14 @@ class cupsBaseClass(ABC):
 
     @__init__.register
     def _(self, arg: str):
+        self._owned = True
+        self._transferred = False
         self.ffi_value = _ffi.new(f"{self.ffi_name} {arg}")
 
     @__init__.register(_ffi.CData)
     def _(self, arg: Any):
+        self._owned = False
+        self._transferred = False
         if arg and self._is_valid_ctype(arg):
             self.ffi_value = arg
         else:
@@ -35,33 +40,53 @@ class cupsBaseClass(ABC):
                 f"Invalid CFFI type for {self.__class__.__name__}: {type(arg)}"
             )
 
-    # @__init__.register(type(None))
-    # def _(self, arg: None = None):
-    #     self.ffi_value = _ffi.new(f"{self.ffi_name} *")
+    @classmethod
+    def from_owned_cdata(cls, c_data: Any):
+        obj = cls.__new__(cls)
+        obj._owned = True
+        obj._transferred = False
+        obj.ffi_value = c_data
+        return obj
 
-    # def __del__(self, extra_args: Optional[List] = None):
-    #     if self.ffi_free:
-    #         cffi_free = getattr(_lib, self.ffi_free, None)
-    #         if cffi_free is None:
-    #             raise AttributeError(f"C function '{self.ffi_free}' not found in lib")
-    #         try:
-    #             cffi_free(*extra_args) if extra_args else cffi_free()
-    #         except Exception as e:
-    #             raise RuntimeError(f"Failed to call C function '{self.ffi_free}': {e}")
+    def _transfer_ownership(self):
+        """Mark object as transferred (e.g. to a C function that consumes it).
+        Prevents __del__ from freeing it."""
+        self._owned = False
+        self._transferred = True
 
-    # @classmethod
-    # def cffi_free(cls, extra_args: Optional[List]):
-    #     if not cls.ffi_free:
-    #         return
+    def __del__(self):
+        # We must not raise exceptions here during shutdown.
+        try:
+            if not getattr(self, "_owned", False):
+                return
+            if getattr(self, "_transferred", False):
+                return
 
-    #     cffi_free = getattr(_lib, cls.ffi_free, None)
-    #     if cffi_free is None:
-    #         raise AttributeError(f"C function '{cls.ffi_free}' not found in lib")
+            # Avoid accessing globals/modules that might be None during shutdown
+            _ffi_local = sys.modules.get("cups")._cups.ffi if "cups" in sys.modules else None
+            _lib_local = sys.modules.get("cups")._cups.lib if "cups" in sys.modules else None
 
-    #     try:
-    #         cffi_free(*extra_args) if extra_args else cffi_free()
-    #     except Exception as e:
-    #         raise RuntimeError(f"Failed to call C function '{cls.ffi_free}': {e}")
+            if _ffi_local is None or _lib_local is None:
+                return
+
+            if getattr(self, "ffi_value", _ffi_local.NULL) == _ffi_local.NULL:
+                return
+
+            ffi_free = getattr(self, "ffi_free", None)
+            if not ffi_free:
+                return
+
+            cffi_free = getattr(_lib_local, ffi_free, None)
+            if cffi_free is None:
+                return
+
+            cffi_free(self.ffi_value)
+
+            # Prevent double-free
+            self.ffi_value = _ffi_local.NULL
+            self._owned = False
+        except Exception:
+            pass
 
     @property
     def valid(self):
