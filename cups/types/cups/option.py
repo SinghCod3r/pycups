@@ -4,13 +4,23 @@ from typing import Any, Dict, Optional
 from cups.types.ipp import IPPRequest, IPPTag, IPPAttribute
 
 class cupsOption(cupsBaseClass):
+    def __init__(self, arg: Any = None, *, name: str = None, value: str = None):
+        self._owned = False
+        self._transferred = False
+        if arg is not None:
+            self._name = _bytes_to_value(arg.name)
+            self._value = _bytes_to_value(arg.value) if arg.value != _ffi.NULL else None
+        else:
+            self._name = name
+            self._value = value
+
     @property
     def name(self) -> str:
-        return _bytes_to_value(self.ffi_value.name)
+        return self._name
 
     @property
     def value(self) -> Optional[Any]:
-        return _bytes_to_value(self.ffi_value.value)
+        return self._value
 
     ffi_name = "cups_option_t"
 
@@ -26,23 +36,30 @@ class cupsOption(cupsBaseClass):
         Returns:
             IPPAttribute: The created IPPAttribute.
         """
-
-        return IPPAttribute(_lib.cupsEncodeOption(ipp_req.ffi_value, group_tag, self.name.encode(), self.value.encode() if self.value else b""))
-
+        return IPPAttribute(
+            _lib.cupsEncodeOption(
+                ipp_req.ffi_value,
+                group_tag,
+                self.name.encode(),
+                self.value.encode() if self.value else b"",
+            ),
+            parent=ipp_req,
+        )
 
     @classmethod
     def to_cffi_list(cls, opts: "Dict[str, cupsOption]") -> Any:
         count = len(opts)
         c_opts = _ffi.new(f"cups_option_t[{count}]")
+        keepalive = []
 
         for i, opt in enumerate(opts.values()):
-            c_opts[i].name = _ffi.new("char[]", opt.name.encode("utf-8"))
-            c_opts[i].value = _ffi.new(
-                "char[]",
-                str(opt.value).encode("utf-8") if opt.value is not None else b"",
-            )
+            c_name = _ffi.new("char[]", opt.name.encode("utf-8"))
+            c_value = _ffi.new("char[]", str(opt.value).encode("utf-8") if opt.value is not None else b"")
+            keepalive.extend([c_name, c_value])
+            c_opts[i].name = c_name
+            c_opts[i].value = c_value
 
-        return c_opts
+        return c_opts, keepalive
 
     @classmethod
     def from_cffi_list(cls, opts: Any, count: int) -> "Dict[str, cupsOption]":
@@ -59,7 +76,6 @@ class cupsOption(cupsBaseClass):
         for i in range(count):
             new_opt: Any = opts[i]
             results[str(_bytes_to_value(new_opt.name))] = cupsOption(new_opt)
-
         return results
 
     def __str__(self):

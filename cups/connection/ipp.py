@@ -45,9 +45,9 @@ class IPPMixin(_Base):
                 value=device,
             )
 
-        answer: IPPRequest = IPPRequest(
-            _lib.cupsDoRequest(self.http, req.ffi_value, b"/admin/")
-        )
+        req._transfer_ownership()
+        c_answer = _lib.cupsDoRequest(self.http, req.ffi_value, b"/admin/")
+        answer = None if c_answer == _cups.ffi.NULL else IPPRequest.from_owned_cdata(c_answer)
 
         if not answer or answer.statuscode > IPPStatus.OK_CONFLICTING:
             raise IPPError(answer)
@@ -62,9 +62,9 @@ class IPPMixin(_Base):
             value=class_uri,
         )
 
-        answer: IPPRequest = IPPRequest(
-            _lib.cupsDoRequest(self.http, req.ffi_value, b"/")
-        )
+        req._transfer_ownership()
+        c_answer = _lib.cupsDoRequest(self.http, req.ffi_value, b"/")
+        answer = None if c_answer == _cups.ffi.NULL else IPPRequest.from_owned_cdata(c_answer)
 
         if answer:
             member_names = next(
@@ -109,9 +109,9 @@ class IPPMixin(_Base):
                 value=printer_uri,
             )
 
-        answer: IPPRequest = IPPRequest(
-            _lib.cupsDoRequest(self.http, req.ffi_value, b"/admin/")
-        )
+        req._transfer_ownership()
+        c_answer = _lib.cupsDoRequest(self.http, req.ffi_value, b"/admin/")
+        answer = None if c_answer == _cups.ffi.NULL else IPPRequest.from_owned_cdata(c_answer)
 
         if not answer or answer.statuscode > IPPStatus.OK_CONFLICTING:
             raise RuntimeError(

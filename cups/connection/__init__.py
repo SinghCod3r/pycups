@@ -76,6 +76,8 @@ class Connection(DestsMixin, JobMixin, _Base):
         family: socket.AddressFamily = socket.AF_UNSPEC,
         msec: int = 3000,
     ):
+        self.http = _ffi.NULL
+
         if host:
             self.host = host
 
@@ -91,6 +93,22 @@ class Connection(DestsMixin, JobMixin, _Base):
         self.http = _lib.httpConnect(
             c_host, c_port, _ffi.NULL, family, c_encryption, True, msec, _ffi.NULL
         )
+
+    def close(self) -> None:
+        http = getattr(self, "http", None)
+        if http is not None:
+            self.http = _ffi.NULL
+            try:
+                if http != _ffi.NULL:
+                    _lib.httpClose(http)
+            except Exception:
+                pass
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def connectAgain(self, msec: int) -> bool:
         return bool(_lib.httpConnectAgain(self.http, msec, _ffi.NULL))
