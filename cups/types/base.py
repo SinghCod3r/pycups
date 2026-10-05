@@ -12,7 +12,7 @@ _lib = _cups.lib
 class cupsBaseClass(ABC):
     ffi_name: str
     ffi_free: str
-    ffi_value: Any
+    ffi_value: Any = _ffi.NULL
 
     @singledispatchmethod
     def __init__(self, arg: Any = None) -> "cupsBaseClass":

@@ -2,8 +2,8 @@ from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from cups.enums.ipp import IPPOp, IPPTag
-from cups.types import Http
 from cups.types.base import _ffi, _lib, cupsBaseClass
+from cups.types.http import Http
 from cups.types.ipp import IPPAttribute, IPPRequest
 from cups.utils import _bytes_to_value
 
